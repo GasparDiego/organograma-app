@@ -1,165 +1,114 @@
-{
- "cells": [
-  {
-   "cell_type": "code",
-   "execution_count": 3,
-   "id": "28ed2cb1-70ad-4e91-b15b-8a14393adb0a",
-   "metadata": {},
-   "outputs": [
-    {
-     "name": "stderr",
-     "output_type": "stream",
-     "text": [
-      "2025-08-20 16:34:07.010 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n",
-      "2025-08-20 16:34:07.011 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n",
-      "2025-08-20 16:34:07.012 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n",
-      "2025-08-20 16:34:07.014 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n",
-      "2025-08-20 16:34:07.015 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n",
-      "2025-08-20 16:34:07.016 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n",
-      "2025-08-20 16:34:07.017 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n",
-      "2025-08-20 16:34:07.017 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n",
-      "2025-08-20 16:34:07.018 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n",
-      "2025-08-20 16:34:07.019 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n"
-     ]
-    }
-   ],
-   "source": [
-    "import streamlit as st\n",
-    "import pandas as pd\n",
-    "from graphviz import Digraph\n",
-    "import textwrap\n",
-    "from collections import defaultdict\n",
-    "import re\n",
-    "import base64\n",
-    "import os\n",
-    "\n",
-    "st.set_page_config(page_title=\"Organograma Dinâmico\", layout=\"wide\")\n",
-    "\n",
-    "st.title(\"📊 Organograma Interativo\")\n",
-    "st.write(\"Carregue um arquivo Excel com as colunas: **Nome, Cargo, Gestor, Setor**\")\n",
-    "\n",
-    "uploaded_file = st.file_uploader(\"Selecione o arquivo Excel\", type=[\"xlsx\"])\n",
-    "\n",
-    "def criar_organograma(df, largura_max=20):\n",
-    "    dot = Digraph(comment=\"Organograma\", format=\"svg\")\n",
-    "    dot.attr(rankdir=\"TB\", size=\"9\", nodesep=\"0.3\", ranksep=\"0.4\")\n",
-    "    dot.attr(\"node\", shape=\"box\", style=\"rounded,filled\", color=\"lightblue\",\n",
-    "             fontname=\"Helvetica\", fontsize=\"12\", width=\"1.6\", height=\"0.9\", fixedsize=\"false\")\n",
-    "    dot.attr(splines=\"ortho\")\n",
-    "\n",
-    "    # Regex para cargos operacionais\n",
-    "    re_operacional = re.compile(r\"\\b(analista|operador|auxiliar|estagiario|aprendiz)\\b\", flags=re.IGNORECASE)\n",
-    "\n",
-    "    # --- Agrupar nós por setor ---\n",
-    "    clusters = {}\n",
-    "    for setor in df[\"Setor\"].dropna().unique():\n",
-    "        with dot.subgraph(name=f\"cluster_{setor}\") as c:\n",
-    "            c.attr(label=setor, style=\"rounded,dashed\", color=\"blue\", fontsize=\"14\", fontname=\"Helvetica-Bold\")\n",
-    "            clusters[setor] = c\n",
-    "\n",
-    "    # --- Nós ---\n",
-    "    for _, row in df.iterrows():\n",
-    "        nome_formatado  = \"\\n\".join(textwrap.wrap(str(row[\"Nome\"]),  largura_max))\n",
-    "        cargo_formatado = \"\\n\".join(textwrap.wrap(str(row[\"Cargo\"]), largura_max))\n",
-    "        label = f\"{nome_formatado}\\n{cargo_formatado}\"\n",
-    "        dot.node(str(row[\"Nome\"]), label)\n",
-    "\n",
-    "    # --- Preparar grupos operacionais por gestor ---\n",
-    "    ops_por_gestor = defaultdict(list)\n",
-    "    for _, row in df.iterrows():\n",
-    "        if row.get(\"Gestor\") and isinstance(row[\"Cargo\"], str) and re_operacional.search(row[\"Cargo\"]):\n",
-    "            ops_por_gestor[str(row[\"Gestor\"])].append(str(row[\"Nome\"]))\n",
-    "\n",
-    "    # --- Arestas ---\n",
-    "    for _, row in df.iterrows():\n",
-    "        if pd.notna(row[\"Gestor\"]) and str(row[\"Gestor\"]).strip() != \"\":\n",
-    "            if isinstance(row[\"Cargo\"], str) and re_operacional.search(row[\"Cargo\"]):\n",
-    "                dot.edge(str(row[\"Gestor\"]), str(row[\"Nome\"]), constraint=\"false\")\n",
-    "            else:\n",
-    "                dot.edge(str(row[\"Gestor\"]), str(row[\"Nome\"]))\n",
-    "\n",
-    "    # --- Forçar empilhamento vertical dos operacionais ---\n",
-    "    for gestor, nomes in ops_por_gestor.items():\n",
-    "        if not nomes:\n",
-    "            continue\n",
-    "        nomes = sorted(nomes, key=lambda x: x.lower())\n",
-    "        dot.edge(gestor, nomes[0], style=\"invis\", weight=\"50\")\n",
-    "        for a, b in zip(nomes, nomes[1:]):\n",
-    "            dot.edge(a, b, style=\"invis\", weight=\"50\")\n",
-    "\n",
-    "    return dot\n",
-    "\n",
-    "def gerar_download(dot, formato=\"svg\"):\n",
-    "    filename = f\"organograma.{formato}\"\n",
-    "    dot.render(filename, format=formato, cleanup=True)\n",
-    "    with open(filename, \"rb\") as f:\n",
-    "        data = f.read()\n",
-    "    b64 = base64.b64encode(data).decode()\n",
-    "    href = f'<a href=\"data:file/{formato};base64,{b64}\" download=\"{filename}\">⬇️ Baixar {formato.upper()}</a>'\n",
-    "    return href\n",
-    "\n",
-    "if uploaded_file is not None:\n",
-    "    df = pd.read_excel(uploaded_file, header=0)\n",
-    "    st.write(\"✅ Arquivo carregado com sucesso!\")\n",
-    "    st.dataframe(df)\n",
-    "\n",
-    "    # --- Filtros ---\n",
-    "    st.sidebar.header(\"🔎 Filtros\")\n",
-    "    \n",
-    "    # Filtro por setor\n",
-    "    setores = [\"Todos\"] + sorted(df[\"Setor\"].dropna().unique().tolist())\n",
-    "    setor_escolhido = st.sidebar.selectbox(\"Filtrar por Setor\", setores)\n",
-    "\n",
-    "    # Filtro por gestor\n",
-    "    gestores = [\"Todos\"] + sorted(df[\"Gestor\"].dropna().unique().tolist())\n",
-    "    gestor_escolhido = st.sidebar.selectbox(\"Filtrar por Gestor\", gestores)\n",
-    "\n",
-    "    # Filtro por colaborador (busca)\n",
-    "    colaborador_busca = st.sidebar.text_input(\"🔍 Buscar colaborador (nome ou parte)\")\n",
-    "\n",
-    "    # --- Aplicação dos filtros ---\n",
-    "    df_filtrado = df.copy()\n",
-    "    if setor_escolhido != \"Todos\":\n",
-    "        df_filtrado = df_filtrado[df_filtrado[\"Setor\"] == setor_escolhido]\n",
-    "    if gestor_escolhido != \"Todos\":\n",
-    "        df_filtrado = df_filtrado[(df_filtrado[\"Gestor\"] == gestor_escolhido) | (df_filtrado[\"Nome\"] == gestor_escolhido)]\n",
-    "    if colaborador_busca.strip() != \"\":\n",
-    "        busca = colaborador_busca.lower()\n",
-    "        df_filtrado = df[df[\"Nome\"].str.lower().str.contains(busca, na=False)]\n",
-    "\n",
-    "    # --- Geração do organograma filtrado ---\n",
-    "    if not df_filtrado.empty:\n",
-    "        dot = criar_organograma(df_filtrado, largura_max=30)\n",
-    "        st.graphviz_chart(dot)\n",
-    "\n",
-    "        # 🔽 Botões de download\n",
-    "        st.markdown(\"### 📥 Exportar Organograma\")\n",
-    "        st.markdown(gerar_download(dot, \"png\"), unsafe_allow_html=True)\n",
-    "        st.markdown(gerar_download(dot, \"svg\"), unsafe_allow_html=True)\n",
-    "    else:\n",
-    "        st.warning(\"⚠️ Nenhum resultado encontrado para os filtros aplicados.\")\n"
-   ]
-  }
- ],
- "metadata": {
-  "kernelspec": {
-   "display_name": "Python 3 (ipykernel)",
-   "language": "python",
-   "name": "python3"
-  },
-  "language_info": {
-   "codemirror_mode": {
-    "name": "ipython",
-    "version": 3
-   },
-   "file_extension": ".py",
-   "mimetype": "text/x-python",
-   "name": "python",
-   "nbconvert_exporter": "python",
-   "pygments_lexer": "ipython3",
-   "version": "3.13.5"
-  }
- },
- "nbformat": 4,
- "nbformat_minor": 5
-}
+import streamlit as st
+import pandas as pd
+from graphviz import Digraph
+import textwrap
+from collections import defaultdict
+import re
+import base64
+import os
+
+st.set_page_config(page_title="Organograma Dinâmico", layout="wide")
+
+st.title("📊 Organograma Interativo")
+st.write("Carregue um arquivo Excel com as colunas: **Nome, Cargo, Gestor, Setor**")
+
+uploaded_file = st.file_uploader("Selecione o arquivo Excel", type=["xlsx"])
+
+def criar_organograma(df, largura_max=20):
+    dot = Digraph(comment="Organograma", format="svg")
+    dot.attr(rankdir="TB", size="9", nodesep="0.3", ranksep="0.4")
+    dot.attr("node", shape="box", style="rounded,filled", color="lightblue",
+             fontname="Helvetica", fontsize="12", width="1.6", height="0.9", fixedsize="false")
+    dot.attr(splines="ortho")
+
+    # Regex para cargos operacionais
+    re_operacional = re.compile(r"\b(analista|operador|auxiliar|estagiario|aprendiz)\b", flags=re.IGNORECASE)
+
+    # --- Agrupar nós por setor ---
+    clusters = {}
+    for setor in df["Setor"].dropna().unique():
+        with dot.subgraph(name=f"cluster_{setor}") as c:
+            c.attr(label=setor, style="rounded,dashed", color="blue", fontsize="14", fontname="Helvetica-Bold")
+            clusters[setor] = c
+
+    # --- Nós ---
+    for _, row in df.iterrows():
+        nome_formatado  = "\n".join(textwrap.wrap(str(row["Nome"]),  largura_max))
+        cargo_formatado = "\n".join(textwrap.wrap(str(row["Cargo"]), largura_max))
+        label = f"{nome_formatado}\n{cargo_formatado}"
+        dot.node(str(row["Nome"]), label)
+
+    # --- Preparar grupos operacionais por gestor ---
+    ops_por_gestor = defaultdict(list)
+    for _, row in df.iterrows():
+        if row.get("Gestor") and isinstance(row["Cargo"], str) and re_operacional.search(row["Cargo"]):
+            ops_por_gestor[str(row["Gestor"])].append(str(row["Nome"]))
+
+    # --- Arestas ---
+    for _, row in df.iterrows():
+        if pd.notna(row["Gestor"]) and str(row["Gestor"]).strip() != "":
+            if isinstance(row["Cargo"], str) and re_operacional.search(row["Cargo"]):
+                dot.edge(str(row["Gestor"]), str(row["Nome"]), constraint="false")
+            else:
+                dot.edge(str(row["Gestor"]), str(row["Nome"]))
+
+    # --- Forçar empilhamento vertical dos operacionais ---
+    for gestor, nomes in ops_por_gestor.items():
+        if not nomes:
+            continue
+        nomes = sorted(nomes, key=lambda x: x.lower())
+        dot.edge(gestor, nomes[0], style="invis", weight="50")
+        for a, b in zip(nomes, nomes[1:]):
+            dot.edge(a, b, style="invis", weight="50")
+
+    return dot
+
+def gerar_download(dot, formato="svg"):
+    filename = f"organograma.{formato}"
+    dot.render(filename, format=formato, cleanup=True)
+    with open(filename, "rb") as f:
+        data = f.read()
+    b64 = base64.b64encode(data).decode()
+    href = f'<a href="data:file/{formato};base64,{b64}" download="{filename}">⬇️ Baixar {formato.upper()}</a>'
+    return href
+
+if uploaded_file is not None:
+    df = pd.read_excel(uploaded_file, header=0)
+    st.write("✅ Arquivo carregado com sucesso!")
+    st.dataframe(df)
+
+    # --- Filtros ---
+    st.sidebar.header("🔎 Filtros")
+    
+    # Filtro por setor
+    setores = ["Todos"] + sorted(df["Setor"].dropna().unique().tolist())
+    setor_escolhido = st.sidebar.selectbox("Filtrar por Setor", setores)
+
+    # Filtro por gestor
+    gestores = ["Todos"] + sorted(df["Gestor"].dropna().unique().tolist())
+    gestor_escolhido = st.sidebar.selectbox("Filtrar por Gestor", gestores)
+
+    # Filtro por colaborador (busca)
+    colaborador_busca = st.sidebar.text_input("🔍 Buscar colaborador (nome ou parte)")
+
+    # --- Aplicação dos filtros ---
+    df_filtrado = df.copy()
+    if setor_escolhido != "Todos":
+        df_filtrado = df_filtrado[df_filtrado["Setor"] == setor_escolhido]
+    if gestor_escolhido != "Todos":
+        df_filtrado = df_filtrado[(df_filtrado["Gestor"] == gestor_escolhido) | (df_filtrado["Nome"] == gestor_escolhido)]
+    if colaborador_busca.strip() != "":
+        busca = colaborador_busca.lower()
+        df_filtrado = df[df["Nome"].str.lower().str.contains(busca, na=False)]
+
+    # --- Geração do organograma filtrado ---
+    if not df_filtrado.empty:
+        dot = criar_organograma(df_filtrado, largura_max=30)
+        st.graphviz_chart(dot)
+
+        # 🔽 Botões de download
+        st.markdown("### 📥 Exportar Organograma")
+        st.markdown(gerar_download(dot, "png"), unsafe_allow_html=True)
+        st.markdown(gerar_download(dot, "svg"), unsafe_allow_html=True)
+    else:
+        st.warning("⚠️ Nenhum resultado encontrado para os filtros aplicados.")
